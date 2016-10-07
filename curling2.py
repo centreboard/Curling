@@ -10,7 +10,7 @@ class Card:
         self.name = str(name)
         if self.name == '10':
             self.name = '0'  # For spacing
-        if name == '*':
+        if name in ['*', 'Jkr', ' ']:
             self.value = 0
         elif name in ['J', 'Q', 'K']:
             self.value = 10
@@ -28,14 +28,22 @@ class Card:
 
 class Joker(Card):
     def __init__(self):
-        self.name = 'Jkr'
-        self.suit = ''
-        self.value = 0
+        super().__init__('Jkr', '')
         self.played = True
         self.discarded = False
 
     def __repr__(self):
         return self.name
+
+
+class BlankCard(Card):
+    def __init__(self):
+        super().__init__(' ', ' ')
+        self.played = True
+        self.discarded = False
+
+    def __bool__(self):
+        return False
 
 
 class Board:
@@ -51,11 +59,11 @@ class Board:
         if empty == 'Default':
             empty = [(0, 0), (0, 1), (0, 3), (0, 4), (1, 0), (1, 4), (3, 0), (3, 4), (4, 0), (4, 1), (4, 3), (4, 4)]
         for x, y in empty:
-            self._cards[x][y] = ''
+            self._cards[x][y] = BlankCard()
         self.scoring_pos = [(1, [(self.joker_pos - 1, self.joker_pos - 1), (self.joker_pos - 1, self.joker_pos + 1),
-                                (self.joker_pos + 1, self.joker_pos - 1), (self.joker_pos + 1, self.joker_pos + 1)]),
+                                 (self.joker_pos + 1, self.joker_pos - 1), (self.joker_pos + 1, self.joker_pos + 1)]),
                             (2, [(self.joker_pos - 1, self.joker_pos), (self.joker_pos, self.joker_pos - 1),
-                                (self.joker_pos + 1, self.joker_pos), (self.joker_pos, self.joker_pos + 1)])]
+                                 (self.joker_pos + 1, self.joker_pos), (self.joker_pos, self.joker_pos + 1)])]
 
         self.first_turn = False
 
@@ -105,14 +113,14 @@ class Board:
                 discarded = ''
                 error = 'Please choose from empty cells {}'.format(empty)
             else:
-                self._cards[ply.row - 1][ply.column - 1] = card
+                discarded, self._cards[ply.row - 1][ply.column - 1] = self._cards[ply.row - 1][ply.column - 1], card
                 if len(self.get_empty()) == 0:
                     self.first_turn = True
-                discarded = 'Insert'  # Evaluates True for move, no card actually discarded.
+                # discarded = 'Insert'  # Evaluates True for move, no card actually discarded.
             # Return is important here
             return discarded, error
-        elif undo and (empty or self.first_turn):
-            self._cards[ply.row - 1][ply.column - 1] = ''
+        elif undo and isinstance(undiscard, BlankCard):
+            self._cards[ply.row - 1][ply.column - 1] = undiscard
             self.first_turn = False
             return 'undo', error
 
@@ -161,19 +169,13 @@ class Board:
         self.first_turn = False
         return discarded, error
 
-#    def is_setup_phase(self):
-#        return (len(self.get_empty()) > 0)
+    #    def is_setup_phase(self):
+    #        return (len(self.get_empty()) > 0)
 
     def __repr__(self):
         out = []
         for row in self._cards:
-            line = []
-            for card in row:
-                if not card:
-                    line.append('   ')
-                else:
-                    line.append(str(card))
-            out.append(' | '.join(line))
+            out.append(' | '.join(str(card) for card in row))
         return '\n'.join(out)
         #  return '\n'.join(' '.join(str(card) for card in rows) for rows in self._cards) + '\n'
 
@@ -350,6 +352,7 @@ class AITreeSearch(Player):
         best = ''
         bestply = ''
         for ply in plies:
+            stored_cards = game.board.cards
             game.make_move(ply)
             if game.gameover:
                 depth = 0
@@ -359,7 +362,9 @@ class AITreeSearch(Player):
             else:
                 node_value = self.tree_search(game, depth - 1)[0]
 
-            game.unmake_move()
+            unply = game.unmake_move()
+            assert ply == unply, 'Mismatch plies {} {}'.format(ply, unply)
+            assert stored_cards == game.board.cards, "Game board cards don't match\n{}\n{}".format(stored_cards, game.board.cards)
             if best == '' or node_value[p_turn] > best[p_turn]:
                 best = node_value
                 bestply = ply
@@ -421,9 +426,8 @@ class GameState:
 
     def statement(self):
         if not self.gameover:
-            return "{}'s turn\nThey scored {} points\nThey have in their hand:\n{}" \
-                .format(self.next_player, \
-                        self.board.score(self.next_player), \
+            return "{}'s turn\nThey scored {} points\nThey have in their hand:\n{}".format(self.next_player,
+                        self.board.score(self.next_player),
                         str([c.name for c in self.next_player.hand]))
         else:
             return "Final score:\n" + '\n'.join('{}: {}'.format(player, player.score) for player in self.players) + \
@@ -498,9 +502,13 @@ class Game:
         player = self.players[self.p_turn]
         discard, error = self.board.update(ply)
         self.plyhistory.append((ply, discard))
-        if discard:
-            if discard != 'Insert':
-                self.discarded.append(discard)
+        if error:
+            if player.AI:
+                raise Exception("AI error: {} trying {} in\n{}".format(error, ply, self.board))
+            else:
+                return error
+        else:
+            self.discarded.append(discard)
             player.play(ply.card)
 
             self.p_turn = (self.p_turn + 1) % len(self.players)
@@ -515,15 +523,11 @@ class Game:
             if self.save:
                 self.dump()
             return 'Done'
-        return error
 
     def unmake_move(self):
         player = self.players[self.p_turn]
         (unply, undiscard) = self.plyhistory.pop()
-
-        if undiscard != "Insert":
-            self.discarded.pop()
-
+        self.discarded.pop()
         if self.gameover:
             self.unfinal()
         else:
@@ -533,10 +537,12 @@ class Game:
         lastplayer = self.players[self.p_turn]
 
         lastplayer.unplay(unply.card)
-        self.board.update(unply, True, undiscard)
+        undiscard, error = self.board.update(unply, True, undiscard)
+        if error:
+            raise Exception("Unmake move error")
         if self.save:
             self.dump()
-        return True
+        return unply
 
     def final(self):
         self.gameover = True
@@ -586,9 +592,9 @@ class Game:
 
 
 def main(fname='curling.pi'):
-    board = Board(empty=[])
+    board = Board(empty="Default")
     players = [AITreeSearch('Matt', chr(9829)),
-               AIPlayer('F. Rob', chr(9830)),
+               AITreeSearch('F. Rob', chr(9830)),
                AITreeSearch('Rob H.', chr(9827))]
     game_state = StartGameState(board, players)
     game = Game(game_state, fname=fname, save=0, load=0)
@@ -598,7 +604,6 @@ def averages(runs):
     global PRINT
     PRINT = False
     results = []
-    runs = 10000
     for _ in range(runs):
         results.append(main())
 

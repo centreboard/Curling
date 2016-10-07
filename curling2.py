@@ -6,7 +6,7 @@ PRINT = True
 
 
 class Card:
-    def __init__(self, name, suit):
+    def __init__(self, name, suit, player=None):
         self.name = str(name)
         if self.name == '10':
             self.name = '0'  # For spacing
@@ -21,6 +21,7 @@ class Card:
         self.suit = suit
         self.played = False
         self.discarded = False
+        self.player = player
 
     def __repr__(self):
         return '{} {}'.format(self.name, self.suit)
@@ -114,14 +115,10 @@ class Board:
                 error = 'Please choose from empty cells {}'.format(empty)
             else:
                 discarded, self._cards[ply.row - 1][ply.column - 1] = self._cards[ply.row - 1][ply.column - 1], card
-                if len(self.get_empty()) == 0:
-                    self.first_turn = True
-                # discarded = 'Insert'  # Evaluates True for move, no card actually discarded.
             # Return is important here
             return discarded, error
         elif undo and isinstance(undiscard, BlankCard):
             self._cards[ply.row - 1][ply.column - 1] = undiscard
-            self.first_turn = False
             return 'undo', error
 
         # Check insertion condition, determine if a row or column is being inserted to
@@ -166,7 +163,6 @@ class Board:
             self._cards = [x for x in map(list, zip(*tempcards))]
 
         discarded.discarded = (not undo)  # Set card attribute
-        self.first_turn = False
         return discarded, error
 
     #    def is_setup_phase(self):
@@ -190,7 +186,7 @@ class Ply:
         self.column = column
 
     def __repr__(self):
-        return repr(self.card) + " at " + str(self.row) + ", " + str(self.column)
+        return str(self.card) + " at " + str(self.row) + ", " + str(self.column)
 
 
 class Player:
@@ -199,14 +195,8 @@ class Player:
         self.name = name
         self.suit = suit
         l = ['K', 'Q', 'J', 'A'] + list(range(2, 11))
-        self.hand = [Card(i, suit) for i in l]
-
+        self.hand = [Card(i, suit, self) for i in l]
         self.AI = False
-
-        self.postinit()  # hook for inheriting classes
-
-    def postinit(self):
-        pass
 
     def in_hand(self, card):
         for c in self.hand:
@@ -238,18 +228,36 @@ class Player:
         self.score += delta
         return self.score
 
+        # given a game state, generate all the moves the current player could make
+    def enum_plies(self, game):
+            # assuming we have cards left to play
+            player = game.players[game.p_turn]
+            card_options = sorted(player.hand, key=lambda x: -x.value)  # cards ordered high-low
+            empty = game.board.get_empty()
+            if empty:
+                rowcol_options = empty
+            else:
+                bsize = game.board.size
+                rowcol_options = [(0, i) for i in range(1, bsize + 1)] + \
+                                 [(bsize + 1, i) for i in range(1, bsize + 1)] + \
+                                 [(i, 0) for i in range(1, bsize + 1)] + \
+                                 [(i, bsize + 1) for i in range(1, bsize + 1)]
+
+            # just choose the highest value card for now
+            card_choice = card_options[0]
+
+            for rowcol in rowcol_options:
+                yield Ply(card_choice, rowcol[0], rowcol[1])
+
     # To be implemented by inheriting classes
-    def make_move(self, board, players, discarded, p_turn, statement):
-        pass
+    def make_move(self, game_state):
+        raise NotImplementedError
 
     def __repr__(self):
         return '{} ({})'.format(self.name, self.suit)
 
 
 class HumanPlayer(Player):
-    def postinit(self):
-        self.AI = False
-
     def make_move(self, game_state):
         while 1:
             while 1:
@@ -274,7 +282,8 @@ class HumanPlayer(Player):
 
 
 class AIPlayer(Player):
-    def postinit(self):
+    def __init__(self, name, suit):
+        super().__init__(name, suit)
         self.AI = True
 
     def make_move(self, game_state):
@@ -299,9 +308,10 @@ class AIPlayer(Player):
 
 
 class AITreeSearch(Player):
-    def postinit(self):
+    def __init__(self, name, suit, depth=2):
+        super().__init__(name, suit)
         self.AI = True
-        self.depth = 4  # tree search depth (plies)
+        self.depth = depth  # tree search depth (plies)
         self.t_game = []  # to hold the local version of the game
 
     def make_move(self, game_state):
@@ -313,7 +323,7 @@ class AITreeSearch(Player):
         self.t_game = Game(game_state, autostart=False)  # copy.deepcopy(Game(game_state, autostart = False))
 
         # do a tree search recursively to find the best ply and its expected scores
-        bestscores, bestply = self.tree_search(self.t_game, 2)
+        bestscores, bestply = self.tree_search(self.t_game, self.depth)
 
         # point the resulting card object to the actual card in the real game
         for card in self.hand:
@@ -323,34 +333,13 @@ class AITreeSearch(Player):
         PRINT = True
         return bestply
 
-    # given a game state, generate all the moves the current player could make
-    def enum_plies(self, game):
-        # assuming we have cards left to play
-        player = game.players[game.p_turn]
-        card_options = sorted(player.hand, key=lambda x: -x.value)  # cards ordered high-low
-        empty = game.board.get_empty()
-        if empty:
-            rowcol_options = empty
-        else:
-            bsize = game.board.size
-            rowcol_options = [(0, i) for i in range(1, bsize + 1)] + \
-                             [(bsize + 1, i) for i in range(1, bsize + 1)] + \
-                             [(i, 0) for i in range(1, bsize + 1)] + \
-                             [(i, bsize + 1) for i in range(1, bsize + 1)]
-
-        # just choose the highest value card for now
-        card_choice = card_options[0]
-
-        for rowcol in rowcol_options:
-            yield Ply(card_choice, rowcol[0], rowcol[1])
 
     # recursive search of future moves to the given depth
     def tree_search(self, game, depth):
-        plyvalues = []
         p_turn = game.p_turn
-        plies = self.enum_plies(game)
+        player = game.players[p_turn]
+        plies = player.enum_plies(game)
         best = ''
-        bestply = ''
         for ply in plies:
             stored_cards = game.board.cards
             game.make_move(ply)
@@ -358,68 +347,76 @@ class AITreeSearch(Player):
                 depth = 0
 
             if depth == 0:
-                node_value = self.heuristic_eval(game)
+                node_values = self.heuristic_eval(game)
             else:
-                node_value = self.tree_search(game, depth - 1)[0]
+                node_values = self.tree_search(game, depth - 1)[0]
 
             unply = game.unmake_move()
             assert ply == unply, 'Mismatch plies {} {}'.format(ply, unply)
             assert stored_cards == game.board.cards, "Game board cards don't match\n{}\n{}".format(stored_cards, game.board.cards)
-            if best == '' or node_value[p_turn] > best[p_turn]:
-                best = node_value
-                bestply = ply
-
+            if best == '' or node_values[player] > best[player]:
+                best = node_values
+                bestplies = [ply]
+            elif node_values[player] == best[player]:
+                bestplies.append(ply)
+        bestply = random.choice(bestplies)
         return best, bestply
 
     # returns the value of the current game for each player in a three-item list
     # trying to take into account immediate future moves without doing a tree search
     # (so that this evaluation doesn't favour the player who just played)
-    def heuristic_eval(self, game):
+    @staticmethod
+    def heuristic_eval(game):
         if not game.gameover:
-            values = [0] * len(game.players)
+            num_players = len(game.players)
+            values = {p:0 for p in game.players}
+            #Catch non player cards
+            values[None] = 0
+            # add some value for cards not currently in scoring positions
+            central = (game.board.size // 2 - 1, game.board.size // 2, game.board.size // 2 + 1)
+            for row, x in enumerate(game.board._cards):
+                for column, card in enumerate(x):
+                    if row in central or column in central:
+                        values[card.player] += 0.5 * card.value
+                    else:
+                        values[card.player] += 0.2 * card.value
             for i, player in enumerate(game.players):
-                waittime = (i - game.p_turn) % len(game.players)  # plies until your next ply
+                waittime = (i - game.p_turn) % num_players  # plies until your next ply
                 score = player.score
-                boardscore = game.board.score(player) * (4 - waittime)  # how good the board is
-                # add some value for cards not currently in scoring positions
-                for row, x in enumerate(game.board.cards):
-                    for column, card in enumerate(x):
-                        if card != '' and card.suit == player.suit:
-                            if row in (2, 3, 4) or column in (2, 3, 4):
-                                boardscore += 0.5 * card.value
-                            else:
-                                boardscore += 0.2 * card.value
-
-                # point difference with the best player other than yourself
-                pointdiff = score - max([x.score for x in game.players if x.name != player.name])
-
+                boardscore = game.board.score(player) * (1 + num_players - waittime)  # how good the board is
                 hand_potential = sum([c.value for c in player.hand])
-                values[i] = pointdiff + 0.2 * boardscore + 0.5 * hand_potential
+                values[player] += score + 0.3 * boardscore + 0.4 * hand_potential
+            s = sum(values.values())
+            for k, v in values.items():
+                values[k] = 2 * v - s #I.e. subtract others
         else:
+            # TODO: Should we differentiate between winning states? E.g probability of winning, margin of winning?
+            # losers have a large negative score
+            values = {p: -500 for p in game.players}
             maxscore = 0
-            winner_ids = []
-            for i, player in enumerate(game.players):
+            winners = []
+            for player in game.players:
                 if player.score > maxscore:
                     maxscore = player.score
-                    winner_ids = [i]
+                    winners = [player]
                 elif player.score == maxscore:
-                    winner_ids.append(i)
-            # losers have a large negative score
-            values = [-10000] * len(game.players)
+                    winners.append(player)
+
             # winner has a large positive score
             # TODO: Should joint winners have lower score?
-            for i in winner_ids:
-                values[i] = 10000
+            winning_bonus = 10000/len(winners)
+            for player in winners:
+                values[player] += winning_bonus
 
         return values
 
 
 # the information which players are sent to make their move
 class GameState:
-    def __init__(self, board, players, discarded, p_turn, gameover):
+    def __init__(self, board, players, plyhistory, p_turn, gameover):
         self.board = board
         self.players = players
-        self.discarded = discarded
+        self.plyhistory = plyhistory
         self.p_turn = p_turn
         self.next_player = self.players[self.p_turn]
         self.gameover = gameover
@@ -434,7 +431,7 @@ class GameState:
                    "\n{} Wins!".format(max((p for p in self.players), key=lambda x: x.score).name)
 
     def __repr__(self):
-        return repr(self.board) + "\n\n" + self.statement()
+        return str(self.board) + "\n\n" + self.statement()
 
 
 class StartGameState(GameState):
@@ -458,7 +455,7 @@ class Game:
 
         self.board = game_state.board
         self.players = game_state.players
-        self.discarded = game_state.discarded
+        self.plyhistory = game_state.plyhistory
         self.p_turn = game_state.p_turn
         self.gameover = game_state.gameover
 
@@ -508,7 +505,6 @@ class Game:
             else:
                 return error
         else:
-            self.discarded.append(discard)
             player.play(ply.card)
 
             self.p_turn = (self.p_turn + 1) % len(self.players)
@@ -527,7 +523,6 @@ class Game:
     def unmake_move(self):
         player = self.players[self.p_turn]
         (unply, undiscard) = self.plyhistory.pop()
-        self.discarded.pop()
         if self.gameover:
             self.unfinal()
         else:
@@ -571,7 +566,7 @@ class Game:
         return True
 
     def get_game_state(self):
-        return GameState(self.board, self.players, self.discarded, self.p_turn, self.gameover)
+        return GameState(self.board, self.players, self.plyhistory, self.p_turn, self.gameover)
 
     def dump(self):
         with open(self.fname, 'wb') as f:
@@ -593,9 +588,9 @@ class Game:
 
 def main(fname='curling.pi'):
     board = Board(empty="Default")
-    players = [AITreeSearch('Matt', chr(9829)),
-               AITreeSearch('F. Rob', chr(9830)),
-               AITreeSearch('Rob H.', chr(9827))]
+    players = [AITreeSearch('Matt', chr(9829), 2),
+               AITreeSearch('F. Rob', chr(9830), 2),
+               AITreeSearch('Rob H.', chr(9827), 2)]
     game_state = StartGameState(board, players)
     game = Game(game_state, fname=fname, save=0, load=0)
 

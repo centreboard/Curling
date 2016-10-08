@@ -2,6 +2,8 @@ import pickle
 import random
 import copy
 
+import time
+
 PRINT = True
 
 
@@ -66,7 +68,6 @@ class Board:
                             (2, [(self.joker_pos - 1, self.joker_pos), (self.joker_pos, self.joker_pos - 1),
                                  (self.joker_pos + 1, self.joker_pos), (self.joker_pos, self.joker_pos + 1)])]
 
-        self.first_turn = False
 
     @property
     def cards(self):
@@ -202,6 +203,7 @@ class Player:
         for c in self.hand:
             if c.name == card or c == card:
                 return c
+        return False
                 # return any(c.name == card for c in self.hand) or card in self.hand
 
     def play(self, card):
@@ -254,7 +256,10 @@ class Player:
         raise NotImplementedError
 
     def __repr__(self):
-        return '{} ({})'.format(self.name, self.suit)
+        if self.AI:
+            return 'AI - {} ({})'.format(self.name, self.suit)
+        else:
+            return '{} ({})'.format(self.name, self.suit)
 
 
 class HumanPlayer(Player):
@@ -369,7 +374,7 @@ class AITreeSearch(Player):
     def heuristic_eval(game):
         if not game.gameover:
             num_players = len(game.players)
-            values = {p:0 for p in game.players}
+            values = {p: 0 for p in game.players}
             #Catch non player cards
             values[None] = 0
             # add some value for cards not currently in scoring positions
@@ -384,7 +389,7 @@ class AITreeSearch(Player):
                 waittime = (i - game.p_turn) % num_players  # plies until your next ply
                 score = player.score
                 boardscore = game.board.score(player) * (1 + num_players - waittime)  # how good the board is
-                hand_potential = sum([c.value for c in player.hand])
+                hand_potential = sum(c.value for c in player.hand)
                 values[player] += score + 0.3 * boardscore + 0.4 * hand_potential
             s = sum(values.values())
             for k, v in values.items():
@@ -435,7 +440,13 @@ class GameState:
 
 
 class StartGameState(GameState):
-    def __init__(self, board, players):
+    def __init__(self, board=None, players=None):
+        if board is None:
+            board = Board(empty="Default")
+        if players is None:
+            players = [HumanPlayer('Matt', chr(9829)),
+                       HumanPlayer('F. Rob', chr(9830)),
+                       HumanPlayer('Rob H.', chr(9827))]
         super().__init__(board, players, [], 0, False)
 
 
@@ -493,6 +504,33 @@ class Game:
             print(ply)
 
         error = self.make_move(ply)
+        return error
+
+    def online_turn(self, card, row, column):
+        t = time.time()
+        self.gameover = False
+
+        player = self.players[self.p_turn]
+        if not player.AI:
+            card = player.in_hand(card)
+            if not card:
+                return 'Please pick card again'
+            ply = Ply(card, row, column)
+            error = self.make_move(ply)
+        else:
+            # Catch and procede when starting from AI player.
+            error = "Done"
+
+        # Loop through AI turns
+        while error == "Done" and self.players[self.p_turn].AI and not self.gameover:
+            player = self.players[self.p_turn]
+            print(player, 'turn')
+            ply = player.make_move(self.get_game_state())
+            error = self.make_move(ply)
+            # Timeout
+            if time.time() - t > 5:
+                break
+
         return error
 
     def make_move(self, ply):

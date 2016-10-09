@@ -1,7 +1,6 @@
 import pickle
 import random
 # import copy
-
 import time
 
 PRINT = True
@@ -22,7 +21,7 @@ class Card:
             self.value = int(name)
         self.suit = suit
         self.played = False
-        # self.discarded = False
+        self.discarded = False
         self.player = player
 
     def __repr__(self):
@@ -33,17 +32,18 @@ class Joker(Card):
     def __init__(self):
         super().__init__('Jkr', '')
         self.played = True
-        # self.discarded = False
+        self.discarded = False
 
     def __repr__(self):
         return self.name
 
 
 class BlankCard(Card):
-    def __init__(self):
+    def __init__(self, pos):
         super().__init__(' ', ' ')
         self.played = True
-        # self.discarded = False
+        self.discarded = False
+        self.pos = pos
 
     def __bool__(self):
         return False
@@ -61,8 +61,11 @@ class Board:
         self._cards[self.joker_pos][self.joker_pos] = self.joker
         if empty == 'Default':
             empty = [(0, 0), (0, 1), (0, 3), (0, 4), (1, 0), (1, 4), (3, 0), (3, 4), (4, 0), (4, 1), (4, 3), (4, 4)]
+        self.blanks = []
         for x, y in empty:
-            self._cards[x][y] = BlankCard()
+            blank = BlankCard((x + 1, y + 1))
+            self._cards[x][y] = blank
+            self.blanks.append(blank)
         self.scoring_pos = [(1, [(self.joker_pos - 1, self.joker_pos - 1), (self.joker_pos - 1, self.joker_pos + 1),
                                  (self.joker_pos + 1, self.joker_pos - 1), (self.joker_pos + 1, self.joker_pos + 1)]),
                             (2, [(self.joker_pos - 1, self.joker_pos), (self.joker_pos, self.joker_pos - 1),
@@ -83,8 +86,8 @@ class Board:
         self._final = 0
 
     def get_empty(self):
-        if any(not x for r in self._cards for x in r):
-            return [(r + 1, c + 1) for r in range(self.size) for c in range(self.size) if not self._cards[r][c]]
+        if any(not blank.discarded for blank in self.blanks):
+            return [blank.pos for blank in self.blanks if not blank.discarded]
         else:
             return []
 
@@ -96,77 +99,69 @@ class Board:
                     if self._cards[x][y] and self._cards[x][y].suit == player.suit:
                         out += s * self._cards[x][y].value
         else:
-            raise Exception('Trying to score points on a finalised board for {}'.format(player.name))
+            raise Exception('Trying to score points on a finalised board for {}'.format(player))
         return out
 
-    def update(self, ply, undo=False, undiscard=''):
-        """Starting from the outside left as column 0, top as row 0, place your card outisde the space you want to
+    def update(self, ply, test=False):
+        """Starting from the outside left as column 0, top as row 0, place your card outside the space you want to
         insert it, e.g. 0, 2 to insert from the left into the second row"""
-        if undo and undiscard == '':
-            raise Exception('Trying to undo a ply without a card to reinstate')
-        if undo:
-            card = undiscard
-        else:
-            card = ply.card
-
+        card = ply.card
         error = ''
         empty = self.get_empty()
-        if empty and not undo:
+        if empty:
             if (ply.row, ply.column) not in empty:
                 if PRINT:
                     print('Please choose from empty cells', empty)
                 discarded = ''
                 error = 'Please choose from empty cells {}'.format(empty)
+                return discarded, error
             else:
                 discarded, self._cards[ply.row - 1][ply.column - 1] = self._cards[ply.row - 1][ply.column - 1], card
-            # Return is important here
-            return discarded, error
-        elif undo and isinstance(undiscard, BlankCard):
-            self._cards[ply.row - 1][ply.column - 1] = undiscard
-            return 'undo', error
-
-        # Check insertion condition, determine if a row or column is being inserted to
-        if 0 < ply.row <= self.size and ply.column in (0, self.size + 1):
-            tempcards = self._cards
-            ins_row = True  # row or column?
-            ins_left = (ply.column == 0) ^ undo  # left(top) or right(bottom)? (reverse if undoing)
-            ins_pos = ply.row  # row(col) index
-        elif 0 < ply.column <= self.size and ply.row in (0, self.size + 1):
-            # treat row and column insertion the same by transposing the card list for one of them
-            tempcards = [x for x in map(list, zip(*self._cards))]
-            # column insertion
-            ins_row = False
-            ins_left = (ply.row == 0) ^ undo
-            ins_pos = ply.column
         else:
-            discarded = ''
-            if PRINT:
-                print('Invalid row/column')
-            error = 'Invalid row/column'
-            return discarded, error
+            # Check insertion condition, determine if a row or column is being inserted to
+            if 0 < ply.row <= self.size and ply.column in (0, self.size + 1):
+                tempcards = self._cards
+                ins_row = True  # row or column?
+                ins_left = (ply.column == 0)  # left(top) or right(bottom)? (reverse if undoing)
+                ins_pos = ply.row  # row(col) index
+            elif 0 < ply.column <= self.size and ply.row in (0, self.size + 1):
+                # treat row and column insertion the same by transposing the card list for one of them
+                tempcards = list(map(list, zip(*self._cards)))
+                # column insertion
+                ins_row = False
+                ins_left = (ply.row == 0)
+                ins_pos = ply.column
+            else:
+                discarded = ''
+                if PRINT:
+                    print('Invalid row/column')
+                error = 'Invalid row/column'
+                return discarded, error
 
-        # treat left and right insertion the same by reversing in one case
-        if ins_left:
-            card_row = tempcards[ins_pos - 1]
-        else:
-            card_row = tempcards[ins_pos - 1][::-1]
+            # treat left and right insertion the same by reversing in one case
+            if ins_left:
+                card_row = tempcards[ins_pos - 1]
+            else:
+                card_row = tempcards[ins_pos - 1][::-1]
 
-        discarded = card_row[-1]
-        new_row = [card] + card_row[:-1]
-        # put the joker back in the right place if we're in that row/col
-        if ins_pos == self.joker_pos + 1:
-            new_row.insert(self.joker_pos, new_row.pop(self.joker_pos + 1))
+            discarded = card_row[-1]
+            new_row = [card] + card_row[:-1]
+            # put the joker back in the right place if we're in that row/col
+            if ins_pos == self.joker_pos + 1:
+                new_row.insert(self.joker_pos, new_row.pop(self.joker_pos + 1))
 
-        # undo the row reverse and transpose
-        if not ins_left:
-            new_row.reverse()
-        if ins_row:
-            self._cards[ins_pos - 1] = new_row
-        else:
-            tempcards[ins_pos - 1] = new_row
-            self._cards = [x for x in map(list, zip(*tempcards))]
+            # undo the row reverse and transpose
+            if not ins_left:
+                new_row.reverse()
+            if ins_row:
+                self._cards[ins_pos - 1] = new_row
+            else:
+                tempcards[ins_pos - 1] = new_row
+                self._cards = [x for x in map(list, zip(*tempcards))]
 
-        # discarded.discarded = (not undo)  # Set card attribute
+        discarded.discarded = 1  # Set card attribute
+        if not test and isinstance(discarded, BlankCard):
+            self.blanks.remove(discarded)
         return discarded, error
 
     #    def is_setup_phase(self):
@@ -194,7 +189,7 @@ class Ply:
 
 
 class Player:
-    def __init__(self, name, suit):
+    def __init__(self, name, suit, card_options=1):
         self.score = 0
         self.name = name
         self.suit = suit
@@ -202,8 +197,10 @@ class Player:
         l = ['K', 'Q', 'J', 'A'] + list(range(2, 11))
         self.hand = sorted((Card(i, suit, self) for i in l), key=lambda x: -x.value)
         self.AI = False
+        self.card_options = card_options
 
     def in_hand(self, card):
+        """Tests if a card (by instance or name) is in player's hand and returns instance or False"""
         for c in self.hand:
             if c.name == card or c == card:
                 return c
@@ -211,6 +208,7 @@ class Player:
         # return any(c.name == card for c in self.hand) or card in self.hand
 
     def play(self, card):
+        """Tells a player to remove a card from their hand"""
         if not self.in_hand(card):
             raise Exception('Card {} not in hand'.format(card))
         for i, c in enumerate(self.hand):
@@ -234,9 +232,10 @@ class Player:
         self.score += delta
         return self.score
 
-        # given a game state, generate all the moves the current player could make
     @staticmethod
     def enum_plies(game, p_turn):
+        """Given a game generates all potential moves for player indexed by p_turn"""
+
         # assuming we have cards left to play
         player = game.players[p_turn]
         # card_options = sorted(player.hand, key=lambda x: -x.value)  Player's hand is now sorted
@@ -250,12 +249,16 @@ class Player:
                              [(i, 0) for i in range(1, bsize + 1)] + \
                              [(i, bsize + 1) for i in range(1, bsize + 1)]
 
-        #choose either the highest or lowest value card
-        if len(player.hand) > 1:
-            card_choices = [player.hand[0], player.hand[-1]]
+        # choose either the highest or lowest value card
+        if len(player.hand) > 1 and player.card_options > 1:
+            if player.card_options == 2:
+                card_choices = [player.hand[0], player.hand[-1]]
+            else:
+                raise NotImplementedError
         else:
+            # Pick maximum
             card_choices = [player.hand[0]]
-            
+
         for card in card_choices:
             for rowcol in rowcol_options:
                 yield Ply(card, rowcol[0], rowcol[1])
@@ -302,6 +305,7 @@ class AIPlayer(Player):
         self.AI = True
 
     def make_move(self, game_state):
+        """Selects max card and random valid row/column"""
         if self.hand:
             card = max(self.hand, key=lambda x: x.value)
         else:
@@ -323,13 +327,14 @@ class AIPlayer(Player):
 
 
 class AITreeSearch(Player):
-    def __init__(self, name, suit, depth=2):
-        super().__init__(name, suit)
+    def __init__(self, name, suit, depth=2, card_options=1):
+        super().__init__(name, suit, card_options)
         self.AI = True
         self.depth = depth  # tree search depth (plies)
         self.t_game = []  # to hold the local version of the game
 
     def make_move(self, game_state):
+        """Runs a tree search to find out best move"""
         # entry point
         global PRINT
         PRINT = False
@@ -355,10 +360,10 @@ class AITreeSearch(Player):
         player = game.players[p_turn]
         plies = player.enum_plies(game, p_turn)
         best = ''
+        # Store a copy of board cards
+        stored_cards = game.board.cards
         for ply in plies:
-            # Store a copy of board cards
-            stored_cards = game.board.cards
-            alter_scores, p_turn, gameover = game.test_move(ply, p_turn, alter_scores)
+            alter_scores, p_turn, gameover, discard = game.test_move(ply, p_turn, alter_scores)
             if gameover or depth == 0:
                 node_values = self.heuristic_eval(game, alter_scores, p_turn, gameover)
             else:
@@ -366,11 +371,13 @@ class AITreeSearch(Player):
 
             # Undo move by
             ply.card.played = False
+            discard.discarded = False
             # Restore the board's cards
             game.board.cards = stored_cards
             # unply = game.unmake_move()
             # assert ply == unply, 'Mismatch plies {} {}'.format(ply, unply)
-            # assert stored_cards == game.board.cards, "Game board cards don't match\n{}\n{}".format(stored_cards, game.board.cards)
+            # assert stored_cards == game.board.cards, "Game board cards don't match\n{}\n{}".format(stored_cards,
+            # game.board.cards)
             if best == '' or node_values[player] > best[player]:
                 best = node_values
                 bestplies = [ply]
@@ -383,6 +390,7 @@ class AITreeSearch(Player):
     # returns the value of the current game for each player in a three-item list
     # trying to take into account immediate future moves without doing a tree search
     # (so that this evaluation doesn't favour the player who just played)
+
     @staticmethod
     def heuristic_eval(game, alter_scores, p_turn, gameover):
         if not gameover:
@@ -392,18 +400,33 @@ class AITreeSearch(Player):
             values[None] = 0
             # add some value for cards not currently in scoring positions
             central = (game.board.size // 2 - 1, game.board.size // 2, game.board.size // 2 + 1)
-            for row, x in enumerate(game.board._cards):
-                for column, card in enumerate(x):
-                    if row in central or column in central:
-                        values[card.player] += 0.5 * card.value
-                    else:
-                        values[card.player] += 0.2 * card.value
+            # TODO: Work out scoring for other sized boards - where are scoring pos etc.
+            # Only worry about outer rows here, inner is counted by score
+            rows = [0, game.board.size - 1]
+            columns = [0, game.board.size - 1]
+            for r in rows:
+                for c in columns:
+                    card = game.board._cards[r][c]
+                    values[card.player] += 0.2 * card.value
+                for c in central:
+                    card = game.board._cards[r][c]
+                    values[card.player] += 0.5 * card.value
+            for c in columns:
+                for r in central:
+                    card = game.board._cards[r][c]
+                    values[card.player] += 0.5 * card.value
+            # for row, x in enumerate(game.board._cards):
+            #     for column, card in enumerate(x):
+            #         if row in central or column in central:
+            #             values[card.player] += 0.5 * card.value
+            #         else:
+            #             values[card.player] += 0.2 * card.value
             for i, player in enumerate(game.players):
                 waittime = (i - p_turn) % num_players  # plies until your next ply
                 score = player.score + alter_scores[player]
                 boardscore = game.board.score(player) * (1 + num_players - waittime)  # how good the board is
-                hand_potential = sum(c.value for c in player.hand)
-                values[player] += score + 0.3 * boardscore + 0.4 * hand_potential
+                hand_potential = sum(c.value for c in player.hand if not c.played)
+                values[player] += score + 0.4 * boardscore + 0.4 * hand_potential
             s = sum(values.values())
             for k, v in values.items():
                 values[k] = 2 * v - s  # I.e. subtract others
@@ -414,10 +437,10 @@ class AITreeSearch(Player):
             maxscore = 0
             winners = []
             for player in game.players:
-                if player.score > maxscore:
-                    maxscore = player.score
+                if player.score + alter_scores[player] > maxscore:
+                    maxscore = player.score  + alter_scores[player]
                     winners = [player]
-                elif player.score == maxscore:
+                elif player.score + alter_scores[player] == maxscore:
                     winners.append(player)
 
             # winner has a large positive score
@@ -495,8 +518,8 @@ class Game:
     def gameloop(self):
         while not self.gameover:
             if PRINT:
+                print()
                 print('\n'.join('{}: {}'.format(player, player.score) for player in self.players))
-            if PRINT:
                 print(self.get_game_state())
             self.turn()
 
@@ -575,7 +598,7 @@ class Game:
 
     def test_move(self, ply, p_turn, alter_scores):
         player = self.players[p_turn]
-        discard, error = self.board.update(ply)
+        discard, error = self.board.update(ply, test=1)
         # self.plyhistory.append((ply, discard))
         if error:
             if player.AI:
@@ -589,17 +612,17 @@ class Game:
 
             next_player = self.players[p_turn]
 
-            alter_scores[next_player] += self.board.score(next_player)
             if not next_player.hand or not any(not c.played for c in next_player.hand):
                 for player in self.players:
                     alter_scores[player] += self.board.score(player)
                 gameover = 1
             else:
+                alter_scores[next_player] += self.board.score(next_player)
                 gameover = 0
 
             # if self.save:
             #     self.dump()
-            return alter_scores, p_turn, gameover
+            return alter_scores, p_turn, gameover, discard
 
     # def unmake_move(self):
     #     player = self.players[self.p_turn]

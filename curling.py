@@ -86,6 +86,7 @@ class Board:
                         out += s * self._cards[x][y].value
         return out
 
+    # noinspection PyUnboundLocalVariable
     def update(self, card, row, column):
         """Starting from the outside left as column 0, top as row 0, place your card outisde the space you want to
         insert it, e.g. 0, 2 to insert from the left into the second row"""

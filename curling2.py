@@ -96,7 +96,7 @@ class Board:
         if not self._final:
             for s, l in self.scoring_pos:
                 for x, y in l:
-                    if self._cards[x][y] and self._cards[x][y].suit == player.suit:
+                    if self._cards[x][y].player == player:
                         out += s * self._cards[x][y].value
         else:
             raise Exception('Trying to score points on a finalised board for {}'.format(player))
@@ -391,6 +391,7 @@ class AITreeSearch(Player):
     # trying to take into account immediate future moves without doing a tree search
     # (so that this evaluation doesn't favour the player who just played)
 
+    # noinspection PyProtectedMember
     @staticmethod
     def heuristic_eval(game, alter_scores, p_turn, gameover):
         if not gameover:
@@ -438,7 +439,7 @@ class AITreeSearch(Player):
             winners = []
             for player in game.players:
                 if player.score + alter_scores[player] > maxscore:
-                    maxscore = player.score  + alter_scores[player]
+                    maxscore = player.score + alter_scores[player]
                     winners = [player]
                 elif player.score + alter_scores[player] == maxscore:
                     winners.append(player)

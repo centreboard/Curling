@@ -232,24 +232,28 @@ class Player:
 
         # given a game state, generate all the moves the current player could make
     def enum_plies(self, game):
-            # assuming we have cards left to play
-            player = game.players[game.p_turn]
-            card_options = sorted(player.hand, key=lambda x: -x.value)  # cards ordered high-low
-            empty = game.board.get_empty()
-            if empty:
-                rowcol_options = empty
-            else:
-                bsize = game.board.size
-                rowcol_options = [(0, i) for i in range(1, bsize + 1)] + \
-                                 [(bsize + 1, i) for i in range(1, bsize + 1)] + \
-                                 [(i, 0) for i in range(1, bsize + 1)] + \
-                                 [(i, bsize + 1) for i in range(1, bsize + 1)]
+        # assuming we have cards left to play
+        player = game.players[game.p_turn]
+        card_options = sorted(player.hand, key=lambda x: -x.value)  # cards ordered high-low
+        empty = game.board.get_empty()
+        if empty:
+            rowcol_options = empty
+        else:
+            bsize = game.board.size
+            rowcol_options = [(0, i) for i in range(1, bsize + 1)] + \
+                             [(bsize + 1, i) for i in range(1, bsize + 1)] + \
+                             [(i, 0) for i in range(1, bsize + 1)] + \
+                             [(i, bsize + 1) for i in range(1, bsize + 1)]
 
-            # just choose the highest value card for now
-            card_choice = card_options[0]
-
+        #choose either the highest or lowest value card
+        if len(card_options) > 1:
+            card_choices = [card_options[0], card_options[-1]]
+        else:
+            card_choices = [card_options[0]]
+            
+        for card in card_choices:
             for rowcol in rowcol_options:
-                yield Ply(card_choice, rowcol[0], rowcol[1])
+                yield Ply(card, rowcol[0], rowcol[1])
 
     # To be implemented by inheriting classes
     def make_move(self, game_state):

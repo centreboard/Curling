@@ -470,8 +470,16 @@ class GameState:
                                                                                            str([c.name for c in
                                                                                                 self.next_player.hand]))
         else:
+            winners = []
+            maxscore = 0
+            for player in self.players:
+                if player.score > maxscore:
+                    maxscore = player.score
+                    winners = [player]
+                elif player.score == maxscore:
+                    winners.append(player)
             return "Final score:\n" + '\n'.join('{}: {}'.format(player, player.score) for player in self.players) + \
-                   "\n{} Wins!".format(max((p for p in self.players), key=lambda x: x.score).name)
+                   "\n\n{} Wins!".format(' '.join(str(p) for p in winners))
 
     def __repr__(self):
         return str(self.board) + "\n\n" + self.statement()
@@ -653,12 +661,13 @@ class Game:
             player.alter_score(score)
 
         self.board.finalise()
+        game_state = self.get_game_state()
         if PRINT:
-            print('Final score:')
-            print('\n'.join('{}: {}'.format(player, player.score) for player in self.players))
+            print("\nFinal board:")
+            print(game_state)
         if self.save:
             self.dump()
-        return self.get_game_state().statement()
+        return game_state.statement()
 
     def unfinal(self):
         self.gameover = False

@@ -96,7 +96,7 @@ class Board:
         if not self._final:
             for s, l in self.scoring_pos:
                 for x, y in l:
-                    if self._cards[x][y] and self._cards[x][y].suit == player.suit:
+                    if self._cards[x][y].player == player:
                         out += s * self._cards[x][y].value
         else:
             raise Exception('Trying to score points on a finalised board for {}'.format(player))
@@ -360,7 +360,7 @@ class AITreeSearch(Player):
         player = game.players[p_turn]
         plies = player.enum_plies(game, p_turn)
         best = ''
-        # Store a copy of board cards
+        # Store a copy of board cards to put back later
         stored_cards = game.board.cards
         for ply in plies:
             new_alter_scores, new_p_turn, gameover, discard = game.test_move(ply, p_turn, alter_scores.copy())
@@ -374,10 +374,6 @@ class AITreeSearch(Player):
             discard.discarded = False
             # Restore the board's cards
             game.board.cards = stored_cards
-            # unply = game.unmake_move()
-            # assert ply == unply, 'Mismatch plies {} {}'.format(ply, unply)
-            # assert stored_cards == game.board.cards, "Game board cards don't match\n{}\n{}".format(stored_cards,
-            # game.board.cards)
             if best == '' or node_values[player] > best[player]:
                 best = node_values
                 bestplies = [ply]
@@ -391,6 +387,7 @@ class AITreeSearch(Player):
     # trying to take into account immediate future moves without doing a tree search
     # (so that this evaluation doesn't favour the player who just played)
 
+    # noinspection PyProtectedMember
     @staticmethod
     def heuristic_eval(game, alter_scores, p_turn, gameover):
         if not gameover:
@@ -426,8 +423,8 @@ class AITreeSearch(Player):
                 waittime = (i - p_turn) % num_players  # plies until your next ply
                 score = player.score + alter_scores[player]
                 boardscore = game.board.score(player) * (1 + num_players - waittime)  # how good the board is
-                hand_potential = sum(c.value for c in player.hand if not c.played)
-                values[player] += score + 0.4 * boardscore + 0.4 * hand_potential
+                #hand_potential = sum(c.value for c in player.hand if not c.played)
+                values[player] += score +  boardscore #+ 0.4 * hand_potential
             s = sum(values.values())
             for k, v in values.items():
                 values[k] = 2 * v - s  # I.e. subtract others
@@ -439,7 +436,7 @@ class AITreeSearch(Player):
             winners = []
             for player in game.players:
                 if player.score + alter_scores[player] > maxscore:
-                    maxscore = player.score  + alter_scores[player]
+                    maxscore = player.score + alter_scores[player]
                     winners = [player]
                 elif player.score + alter_scores[player] == maxscore:
                     winners.append(player)
@@ -509,18 +506,14 @@ class Game:
         else:
             self.save = 0
             self.fname = 'err.pi'
-
         self.board = game_state.board
         self.players = game_state.players
         self.plyhistory = game_state.plyhistory
         self.p_turn = game_state.p_turn
         self.gameover = game_state.gameover
-
         self.plyhistory = []
-
         if self.save:
             self.dump()
-
         if autostart:
             self.gameloop()
 
@@ -534,9 +527,7 @@ class Game:
 
     def turn(self):
         self.gameover = False
-
         player = self.players[self.p_turn]
-
         while True:
             ply = player.make_move(self.get_game_state())
 
@@ -545,18 +536,15 @@ class Game:
                 return 'Please pick card again'
             else:
                 break
-
         if PRINT:
             # noinspection PyUnboundLocalVariable
             print(ply)
-
         error = self.make_move(ply)
         return error
 
     def online_turn(self, card, row, column):
         t = time.time()
         self.gameover = False
-
         player = self.players[self.p_turn]
         if not player.AI:
             card = player.in_hand(card)
@@ -565,9 +553,8 @@ class Game:
             ply = Ply(card, row, column)
             error = self.make_move(ply)
         else:
-            # Catch and procede when starting from AI player.
+            # Catch and proceed when starting from AI player.
             error = "Done"
-
         # Loop through AI turns
         while error == "Done" and self.players[self.p_turn].AI and not self.gameover:
             player = self.players[self.p_turn]
@@ -577,7 +564,6 @@ class Game:
             # Timeout
             if time.time() - t > 5:
                 break
-
         return error
 
     def make_move(self, ply):
@@ -591,16 +577,12 @@ class Game:
                 return error
         else:
             player.play(ply.card)
-
             self.p_turn = (self.p_turn + 1) % len(self.players)
-
             next_player = self.players[self.p_turn]
-
             if not next_player.hand:
                 self.final()
             else:
                 next_player.alter_score(self.board.score(next_player))
-
             if self.save:
                 self.dump()
             return 'Done'
@@ -615,12 +597,9 @@ class Game:
             else:
                 return error
         else:
-            # player.play(ply.card)
             ply.card.played = True
             p_turn = (p_turn + 1) % len(self.players)
-
             next_player = self.players[p_turn]
-
             if not next_player.hand or not any(not c.played for c in next_player.hand):
                 for player in self.players:
                     alter_scores[player] += self.board.score(player)
@@ -628,9 +607,6 @@ class Game:
             else:
                 alter_scores[next_player] += self.board.score(next_player)
                 gameover = 0
-
-            # if self.save:
-            #     self.dump()
             return alter_scores, p_turn, gameover, discard
 
     # def unmake_move(self):

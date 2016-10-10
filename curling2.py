@@ -363,11 +363,11 @@ class AITreeSearch(Player):
         # Store a copy of board cards
         stored_cards = game.board.cards
         for ply in plies:
-            alter_scores, p_turn, gameover, discard = game.test_move(ply, p_turn, alter_scores)
+            new_alter_scores, new_p_turn, gameover, discard = game.test_move(ply, p_turn, alter_scores.copy())
             if gameover or depth == 0:
-                node_values = self.heuristic_eval(game, alter_scores, p_turn, gameover)
+                node_values = self.heuristic_eval(game, new_alter_scores, new_p_turn, gameover)
             else:
-                node_values = self.tree_search(game, depth - 1, p_turn, alter_scores.copy())[0]
+                node_values = self.tree_search(game, depth - 1, new_p_turn, new_alter_scores)[0]
 
             # Undo move by
             ply.card.played = False
@@ -415,6 +415,7 @@ class AITreeSearch(Player):
                 for r in central:
                     card = game.board._cards[r][c]
                     values[card.player] += 0.5 * card.value
+            del values[None]
             # for row, x in enumerate(game.board._cards):
             #     for column, card in enumerate(x):
             #         if row in central or column in central:
